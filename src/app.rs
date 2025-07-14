@@ -34,7 +34,7 @@ pub enum Message {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToolCall {
     ReadFile { path: String },
     ReadDirectory { path: String },
@@ -59,6 +59,9 @@ pub struct App {
     pub stream: Option<Pin<Box<dyn futures::Stream<Item = Result<String>> + Send>>>,
     pub working_directory: String,
     pub system_prompt: String,
+    pub scroll_offset: usize,
+    pub memories: Vec<(String, String)>, // (user, assistant)
+    pub chat_history: Vec<(String, String)>, // (role, content)
 }
 
 impl App {
@@ -84,8 +87,47 @@ impl App {
             streaming_message: None,
             stream: None,
             working_directory: cwd.display().to_string(),
-            system_prompt,
+            system_prompt: system_prompt.clone(),
+            scroll_offset: 0,
+            memories: Vec::new(),
+            chat_history: vec![("system".to_string(), system_prompt)],
         })
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = self.messages.len().saturating_sub(1);
+    }
+
+    // After each assistant response, push the (user, assistant) pair to memories
+    fn add_memory(&mut self, user: &str, assistant: &str) {
+        self.memories.push((user.to_string(), assistant.to_string()));
+    }
+
+    // After each user/assistant message, push to chat_history
+    fn add_user_message(&mut self, content: &str) {
+        self.chat_history.push(("user".to_string(), content.to_string()));
+    }
+    fn add_assistant_message(&mut self, content: &str) {
+        self.chat_history.push(("assistant".to_string(), content.to_string()));
+    }
+
+    // Build the messages array for the API call
+    fn build_messages(&self, user_message: &str) -> Vec<(String, String)> {
+        let mut messages = self.chat_history.clone();
+        messages.push(("user".to_string(), user_message.to_string()));
+        messages
+    }
+
+    // When constructing the prompt for a new message, include all memories
+    fn build_prompt(&self, user_message: &str) -> String {
+        let mut prompt = String::new();
+        prompt.push_str(&self.system_prompt);
+        prompt.push_str("\n\n");
+        for (user, assistant) in &self.memories {
+            prompt.push_str(&format!("USER: {}\nASSISTANT: {}\n", user, assistant));
+        }
+        prompt.push_str(&format!("USER: {}\nASSISTANT:", user_message));
+        prompt
     }
 
     pub async fn handle_input(&mut self, key: KeyEvent) -> Result<()> {
@@ -93,13 +135,11 @@ impl App {
         if let Some(Message::PendingToolCall { tool_call, original_message, .. }) = self.messages.back().cloned() {
             match key.code {
                 KeyCode::Right => {
-                    // Accept: execute the tool call and replace the message with the result
+                    // Accept: execute the tool call and send the result as a new user message to the AI
                     let result = self.execute_tool_call(tool_call.clone()).await?;
                     self.messages.pop_back();
-                    self.messages.push_back(Message::ToolCallResult {
-                        result,
-                        timestamp: chrono::Utc::now(),
-                    });
+                    // Do NOT push a user message with the result; instead, send it as a hidden user message to the AI
+                    self.start_message_sending_with_content(result).await?;
                     return Ok(());
                 }
                 KeyCode::Left => {
@@ -176,13 +216,12 @@ impl App {
         self.input.clear();
         self.input_cursor_position = 0;
 
-        // Add user message to history
+        self.add_user_message(&user_message);
         self.messages.push_back(Message::User {
             content: user_message.clone(),
             timestamp: chrono::Utc::now(),
         });
 
-        // Keep only last 50 messages to prevent memory issues
         if self.messages.len() > 50 {
             self.messages.pop_front();
         }
@@ -191,9 +230,38 @@ impl App {
         self.error_message = None;
         self.streaming_message = Some(String::new());
 
-        // Start the stream
         let selected_model = &self.models[self.selected_model_index];
-        match self.ollama_client.chat_stream(selected_model.name.clone(), user_message, &self.system_prompt).await {
+        let messages = self.build_messages("");
+        match self.ollama_client.chat_stream(selected_model.name.clone(), messages).await {
+            Ok(stream) => {
+                self.stream = Some(stream);
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Error: {}", e));
+                self.is_loading = false;
+                self.streaming_message = None;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn start_message_sending_with_content(&mut self, content: String) -> Result<()> {
+        let user_message = content;
+        self.input.clear();
+        self.input_cursor_position = 0;
+
+        self.add_user_message(&user_message);
+        if self.messages.len() > 50 {
+            self.messages.pop_front();
+        }
+
+        self.is_loading = true;
+        self.error_message = None;
+        self.streaming_message = Some(String::new());
+
+        let selected_model = &self.models[self.selected_model_index];
+        let messages = self.build_messages("");
+        match self.ollama_client.chat_stream(selected_model.name.clone(), messages).await {
             Ok(stream) => {
                 self.stream = Some(stream);
             }
@@ -262,12 +330,16 @@ impl App {
         // When done, push the full message to history
         if let Some(content) = self.streaming_message.take() {
             if !content.trim().is_empty() {
+                self.add_assistant_message(&content);
                 self.messages.push_back(Message::Assistant {
                     content: content.clone(),
                     timestamp: chrono::Utc::now(),
                 });
+                self.scroll_to_bottom();
                 // Parse for tool calls in the assistant message
                 self.parse_tool_calls(&content);
+                // Add memory after each assistant response
+                self.add_memory("USER", &content);
             }
         }
         self.is_loading = false;
@@ -291,6 +363,7 @@ impl App {
                 original_message: format!("{}(\"{}\")", tool, path),
                 timestamp: chrono::Utc::now(),
             });
+            self.scroll_to_bottom();
         }
     }
 
@@ -333,11 +406,11 @@ impl App {
             "[TOOL DENIED]\nTool call was denied by the user:\n[tool_call: {}]",
             pending.original_message
         );
-        self.messages.push_back(Message {
-            role: "assistant".to_string(),
+        self.messages.push_back(Message::Assistant {
             content: msg,
             timestamp: chrono::Utc::now(),
         });
+        self.scroll_to_bottom();
     }
 
     pub fn get_selected_model(&self) -> Option<&Model> {

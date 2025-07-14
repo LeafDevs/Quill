@@ -65,6 +65,8 @@ Environment context:\n\
 - Architecture: {}\n\
 - Working Directory: {}\n\
 \
+
+All tools that require a path or a file should default to using the working directory as the default path.
 Available tools and their precise functions:\n  - read_directory(path: str): Lists all files and directories within the specified directory path.\n  - read_file(path: str): Reads and returns the contents of a single file at the given path.\n\
 Tool invocation format:\n  [tool_call: TOOL_NAME(ARGUMENTS)]\n\
 Guidelines for tool usage:\n- Always use the exact tool name and provide all required arguments in the correct format.\n- Only call one tool per [tool_call: ...] block.\n- If a user request requires multiple steps, respond with each tool call in sequence, one per line.\n- Do not attempt to perform actions outside the provided tools.\n- If you need clarification or additional information from the user, ask a clear and concise question before proceeding.\n- When returning information to the user, summarize results clearly and concisely.\n\

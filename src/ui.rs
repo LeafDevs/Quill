@@ -7,6 +7,7 @@ use tui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap, Clear},
     Frame,
 };
+use tui::text::Text;
 
 const TITLE_ART: [&str; 6] = [
     " ██████╗ ██╗   ██╗██╗██╗     ██╗     ",
@@ -16,6 +17,15 @@ const TITLE_ART: [&str; 6] = [
     "╚██████╔╝╚██████╔╝██║███████╗███████╗",
     " ╚══▀▀═╝  ╚═════╝ ╚═╝╚══════╝╚══════╝",
 ];
+
+fn required_height(text: &str, width: u16) -> u16 {
+    let mut lines = 0;
+    for line in text.lines() {
+        let len = line.chars().count() as u16;
+        lines += (len / width).max(1);
+    }
+    lines
+}
 
 pub fn draw<B: Backend>(f: &mut Frame<B>, app: &App) {
     let size = f.size();
@@ -75,148 +85,76 @@ fn draw_model_selector_bar<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) 
 }
 
 fn draw_chat_area<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
-    let mut y_offset = area.y;
-    let max_width = area.width;
+    use tui::text::Text;
+    let mut text = Text::default();
     for message in &app.messages {
         match message {
             Message::User { content, timestamp } => {
-                let msg = Paragraph::new(Spans::from(vec![
-                    Span::styled(">", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(content, Style::default().fg(Color::White)),
-                ]))
-                .alignment(Alignment::Right)
-                .wrap(Wrap { trim: true });
-                let meta = Paragraph::new(Spans::from(vec![
-                    Span::styled(
-                        format!("USER {}", timestamp.format("%H:%M")),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
-                    ),
-                ]))
-                .alignment(Alignment::Right)
-                .style(Style::default().fg(Color::DarkGray));
-                let meta_area = Rect { x: area.x, y: y_offset, width: area.width, height: 1 };
-                let msg_area = Rect { x: area.x, y: y_offset + 1, width: max_width, height: 2 };
-                f.render_widget(meta, meta_area);
-                f.render_widget(msg, msg_area);
-                y_offset += 3;
+                text.extend(vec![
+                    Spans::from(vec![
+                        Span::styled("> ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled(content, Style::default().fg(Color::White)),
+                    ]),
+                    Spans::from(vec![
+                        Span::styled(
+                            format!("USER {}", timestamp.format("%H:%M")),
+                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                        ),
+                    ]),
+                    Spans::from("")
+                ]);
             }
             Message::Assistant { content, timestamp } => {
-                let msg = Paragraph::new(Spans::from(vec![
-                    Span::styled("<", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                    Span::raw(" "),
-                    Span::styled(content, Style::default().fg(Color::White)),
-                ]))
-                .alignment(Alignment::Left)
-                .wrap(Wrap { trim: true });
-                let meta = Paragraph::new(Spans::from(vec![
-                    Span::styled(
-                        format!("ASSISTANT {}", timestamp.format("%H:%M")),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
-                    ),
-                ]))
-                .alignment(Alignment::Left)
-                .style(Style::default().fg(Color::DarkGray));
-                let meta_area = Rect { x: area.x, y: y_offset, width: area.width, height: 1 };
-                let msg_area = Rect { x: area.x, y: y_offset + 1, width: max_width, height: 2 };
-                f.render_widget(meta, meta_area);
-                f.render_widget(msg, msg_area);
-                y_offset += 3;
+                text.extend(vec![
+                    Spans::from(vec![
+                        Span::styled("< ", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                        Span::styled(content, Style::default().fg(Color::White)),
+                    ]),
+                    Spans::from(vec![
+                        Span::styled(
+                            format!("ASSISTANT {}", timestamp.format("%H:%M")),
+                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                        ),
+                    ]),
+                    Spans::from("")
+                ]);
             }
-            Message::PendingToolCall { tool_call, original_message, timestamp } => {
+            Message::PendingToolCall { tool_call, original_message, timestamp: _ } => {
                 let (desc, color) = match tool_call {
                     ToolCall::ReadFile { path } => (format!("[TOOL CALL] read_file: {}", path), Color::Green),
                     ToolCall::ReadDirectory { path } => (format!("[TOOL CALL] read_directory: {}", path), Color::Blue),
                 };
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(color))
-                    .title("Pending Tool Call");
-                let lines = vec![
-                    Spans::from(Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))),
-                    Spans::from(Span::styled(format!("[tool_call: {}]", original_message), Style::default().fg(Color::DarkGray))),
-                    Spans::from(Span::styled("→ Accept   ← Deny", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-                ];
-                let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: true });
-                let area_tool = Rect { x: area.x, y: y_offset, width: area.width, height: 4 };
-                f.render_widget(para, area_tool);
-                y_offset += 5;
+                text.extend(vec![
+                    Spans::from(vec![Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))]),
+                    Spans::from(vec![Span::styled(format!("[tool_call: {}]", original_message), Style::default().fg(Color::DarkGray))]),
+                    Spans::from(vec![Span::styled("→ Accept   ← Deny", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))]),
+                    Spans::from("")
+                ]);
             }
             Message::ToolCallResult { result, timestamp } => {
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green))
-                    .title("Tool Result");
-                let lines = vec![
-                    Spans::from(Span::styled(result, Style::default().fg(Color::White))),
-                    Spans::from(Span::styled(format!("{}", timestamp.format("%H:%M")), Style::default().fg(Color::DarkGray))),
-                ];
-                let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: true });
-                let area_tool = Rect { x: area.x, y: y_offset, width: area.width, height: 4 };
-                f.render_widget(para, area_tool);
-                y_offset += 5;
+                text.extend(vec![
+                    Spans::from(vec![Span::styled(result, Style::default().fg(Color::White))]),
+                    Spans::from(vec![Span::styled(format!("{}", timestamp.format("%H:%M")), Style::default().fg(Color::DarkGray))]),
+                    Spans::from("")
+                ]);
             }
             Message::ToolCallDenied { tool_call, original_message, timestamp } => {
                 let (desc, color) = match tool_call {
                     ToolCall::ReadFile { path } => (format!("[TOOL CALL DENIED] read_file: {}", path), Color::Red),
                     ToolCall::ReadDirectory { path } => (format!("[TOOL CALL DENIED] read_directory: {}", path), Color::Red),
                 };
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Red))
-                    .title("Tool Call Denied");
-                let lines = vec![
-                    Spans::from(Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))),
-                    Spans::from(Span::styled(format!("[tool_call: {}]", original_message), Style::default().fg(Color::DarkGray))),
-                    Spans::from(Span::styled(format!("{}", timestamp.format("%H:%M")), Style::default().fg(Color::DarkGray))),
-                ];
-                let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: true });
-                let area_tool = Rect { x: area.x, y: y_offset, width: area.width, height: 4 };
-                f.render_widget(para, area_tool);
-                y_offset += 5;
+                text.extend(vec![
+                    Spans::from(vec![Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))]),
+                    Spans::from(vec![Span::styled(format!("[tool_call: {}]", original_message), Style::default().fg(Color::DarkGray))]),
+                    Spans::from(vec![Span::styled(format!("{}", timestamp.format("%H:%M")), Style::default().fg(Color::DarkGray))]),
+                    Spans::from("")
+                ]);
             }
         }
     }
-    // Show streaming message if present
-    if let Some(content) = &app.streaming_message {
-        let prefix = "<";
-        let prefix_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
-        let align = Alignment::Left;
-        let msg = Paragraph::new(Spans::from(vec![
-            Span::styled(prefix, prefix_style),
-            Span::raw(" "),
-            Span::styled(content, Style::default().fg(Color::White)),
-            Span::styled("▋", Style::default().fg(Color::Yellow)), // Blinking cursor effect
-        ]))
-        .alignment(align)
-        .wrap(Wrap { trim: true });
-        let meta = Paragraph::new(Spans::from(vec![
-            Span::styled("ASSISTANT (typing...)", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
-        ]))
-        .alignment(align)
-        .style(Style::default().fg(Color::DarkGray));
-        let meta_area = Rect {
-            x: area.x,
-            y: y_offset,
-            width: area.width,
-            height: 1,
-        };
-        let msg_area = Rect {
-            x: area.x,
-            y: y_offset + 1,
-            width: max_width,
-            height: 2,
-        };
-        f.render_widget(meta, meta_area);
-        f.render_widget(msg, msg_area);
-    }
-    // Show error if present
-    if let Some(error) = &app.error_message {
-        let error = Paragraph::new(error.clone())
-            .style(Style::default().fg(Color::Red))
-            .alignment(Alignment::Center);
-        f.render_widget(error, area);
-    }
+    let para = Paragraph::new(text).wrap(Wrap { trim: true });
+    f.render_widget(Clear, area);
+    f.render_widget(para, area);
 }
 
 fn draw_input_area<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {

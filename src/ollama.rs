@@ -94,20 +94,15 @@ impl OllamaClient {
         }
     }
 
-    pub async fn chat_stream(&self, model_name: String, message: String, system_prompt: &str) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    pub async fn chat_stream(&self, model_name: String, messages: Vec<(String, String)>) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
         let url = format!("{}/api/chat", self.base_url);
+        let request_messages: Vec<ChatMessage> = messages
+            .into_iter()
+            .map(|(role, content)| ChatMessage { role, content })
+            .collect();
         let request = ChatRequest {
             model: model_name,
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: message,
-                }
-            ],
+            messages: request_messages,
             stream: true,
         };
         let response = self.client.post(&url).json(&request).send().await?;
