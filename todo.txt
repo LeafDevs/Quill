@@ -9,3 +9,7 @@ Maybe add other provider support like openai, gemini, anthropic and even openrou
 Maybe even add a backend server to make this a paid 20$ a month or 30$ a month for access to 500 requests a month for premium models from other providers
 
 find beta testers/people who want to test this and give me feedback cuz why not it might be very good, or it might not :P.
+
+
+
+Also fix alot of bugs that arent already fixed within this commit.

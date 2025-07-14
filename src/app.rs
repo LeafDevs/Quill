@@ -368,7 +368,7 @@ impl App {
         use regex::Regex;
         use serde_json::Value;
         // Regex for edit_file
-        let re_edit = Regex::new(r#"\[tool_call:\s*edit_file\(path=['"](.*?)['"],\s*edits=(\[.*?\])\)\]"#).unwrap();
+        let re_edit = Regex::new(r#"(?s)\[tool_call:\s*edit_file\(path=['"](.*?)['"],\s*edits=(\[.*\])\)\]"#).unwrap();
         if let Some(cap) = re_edit.captures(message) {
             let path = cap[1].trim().to_string();
             let edits_json = &cap[2];
