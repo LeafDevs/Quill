@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use std::pin::Pin;
+use crate::app::ChatTurn;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
@@ -94,12 +97,16 @@ impl OllamaClient {
         }
     }
 
-    pub async fn chat_stream(&self, model_name: String, messages: Vec<(String, String)>) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    pub async fn chat_stream(&self, model_name: String, messages: Vec<ChatTurn>) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
         let url = format!("{}/api/chat", self.base_url);
         let request_messages: Vec<ChatMessage> = messages
-            .into_iter()
-            .map(|(role, content)| ChatMessage { role, content })
+            .iter()
+            .map(|turn| ChatMessage { role: turn.role.clone(), content: turn.content.clone() })
             .collect();
+        // Debug log
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open("chat_debug.log") {
+            let _ = writeln!(file, "{}", serde_json::to_string_pretty(&request_messages).unwrap_or_default());
+        }
         let request = ChatRequest {
             model: model_name,
             messages: request_messages,

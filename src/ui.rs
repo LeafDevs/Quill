@@ -87,7 +87,22 @@ fn draw_model_selector_bar<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) 
 fn draw_chat_area<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
     use tui::text::Text;
     let mut text = Text::default();
-    for message in &app.messages {
+    // Estimate how many lines each message will take (naive: 2 lines per message)
+    let max_lines = area.height as usize;
+    let mut lines_used = 0;
+    let mut visible_msgs = Vec::new();
+    // Walk backwards through messages, collecting as many as fit
+    for message in app.messages.iter().rev() {
+        // Estimate lines for each message (could be improved with real wrapping logic)
+        let lines = 3; // 1 for content, 1 for meta, 1 for spacing
+        if lines_used + lines > max_lines {
+            break;
+        }
+        visible_msgs.push(message);
+        lines_used += lines;
+    }
+    visible_msgs.reverse();
+    for message in visible_msgs {
         match message {
             Message::User { content, timestamp } => {
                 text.extend(vec![
@@ -123,6 +138,7 @@ fn draw_chat_area<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
                 let (desc, color) = match tool_call {
                     ToolCall::ReadFile { path } => (format!("[TOOL CALL] read_file: {}", path), Color::Green),
                     ToolCall::ReadDirectory { path } => (format!("[TOOL CALL] read_directory: {}", path), Color::Blue),
+                    ToolCall::EditFile { path, .. } => (format!("[TOOL CALL] edit_file: {}", path), Color::Yellow),
                 };
                 text.extend(vec![
                     Spans::from(vec![Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))]),
@@ -142,6 +158,7 @@ fn draw_chat_area<B: Backend>(f: &mut Frame<B>, area: Rect, app: &App) {
                 let (desc, color) = match tool_call {
                     ToolCall::ReadFile { path } => (format!("[TOOL CALL DENIED] read_file: {}", path), Color::Red),
                     ToolCall::ReadDirectory { path } => (format!("[TOOL CALL DENIED] read_directory: {}", path), Color::Red),
+                    ToolCall::EditFile { path, .. } => (format!("[TOOL CALL DENIED] edit_file: {}", path), Color::Red),
                 };
                 text.extend(vec![
                     Spans::from(vec![Span::styled(desc, Style::default().fg(color).add_modifier(Modifier::BOLD))]),

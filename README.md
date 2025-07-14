@@ -1,4 +1,5 @@
 # Quill - AI Development Assistant
+*AI Generated this shit I wanted it to generate a readme.md file for me cuz i didnt feel like writing one at the time so dont trust ANYTHING you see in here. ill rewrite this at a different time.*
 
 A beautiful terminal-based AI assistant for developers, built with Rust and designed to work seamlessly with Ollama models.
 

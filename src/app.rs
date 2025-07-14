@@ -38,12 +38,26 @@ pub enum Message {
 pub enum ToolCall {
     ReadFile { path: String },
     ReadDirectory { path: String },
+    EditFile { path: String, edits: Vec<Edit> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Edit {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub new_text: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct PendingToolCall {
     pub tool_call: ToolCall,
     pub original_message: String, // The raw [tool_call: ...] string
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatTurn {
+    pub role: String, // "user" or "assistant"
+    pub content: String,
 }
 
 pub struct App {
@@ -61,7 +75,7 @@ pub struct App {
     pub system_prompt: String,
     pub scroll_offset: usize,
     pub memories: Vec<(String, String)>, // (user, assistant)
-    pub chat_history: Vec<(String, String)>, // (role, content)
+    pub chat_history: Vec<ChatTurn>,
 }
 
 impl App {
@@ -90,7 +104,7 @@ impl App {
             system_prompt: system_prompt.clone(),
             scroll_offset: 0,
             memories: Vec::new(),
-            chat_history: vec![("system".to_string(), system_prompt)],
+            chat_history: vec![ChatTurn { role: "system".to_string(), content: system_prompt.clone() }],
         })
     }
 
@@ -105,16 +119,18 @@ impl App {
 
     // After each user/assistant message, push to chat_history
     fn add_user_message(&mut self, content: &str) {
-        self.chat_history.push(("user".to_string(), content.to_string()));
+        self.chat_history.push(ChatTurn { role: "user".to_string(), content: content.to_string() });
     }
     fn add_assistant_message(&mut self, content: &str) {
-        self.chat_history.push(("assistant".to_string(), content.to_string()));
+        self.chat_history.push(ChatTurn { role: "assistant".to_string(), content: content.to_string() });
     }
 
     // Build the messages array for the API call
-    fn build_messages(&self, user_message: &str) -> Vec<(String, String)> {
+    fn build_messages(&self, user_message: &str) -> Vec<ChatTurn> {
         let mut messages = self.chat_history.clone();
-        messages.push(("user".to_string(), user_message.to_string()));
+        if !user_message.is_empty() {
+            messages.push(ChatTurn { role: "user".to_string(), content: user_message.to_string() });
+        }
         messages
     }
 
@@ -339,7 +355,9 @@ impl App {
                 // Parse for tool calls in the assistant message
                 self.parse_tool_calls(&content);
                 // Add memory after each assistant response
-                self.add_memory("USER", &content);
+                if let Some(last_user_message) = self.chat_history.iter().rfind(|m| m.role == "user").cloned() {
+                    self.add_memory(&last_user_message.content, &content);
+                }
             }
         }
         self.is_loading = false;
@@ -348,6 +366,21 @@ impl App {
 
     pub fn parse_tool_calls(&mut self, message: &str) {
         use regex::Regex;
+        use serde_json::Value;
+        // Regex for edit_file
+        let re_edit = Regex::new(r#"\[tool_call:\s*edit_file\(path=['"](.*?)['"],\s*edits=(\[.*?\])\)\]"#).unwrap();
+        if let Some(cap) = re_edit.captures(message) {
+            let path = cap[1].trim().to_string();
+            let edits_json = &cap[2];
+            if let Ok(edits) = serde_json::from_str::<Vec<Edit>>(edits_json) {
+                self.messages.push_back(Message::PendingToolCall {
+                    tool_call: ToolCall::EditFile { path: path.clone(), edits },
+                    original_message: format!("edit_file(path=\"{}\", edits={})", path, edits_json),
+                    timestamp: chrono::Utc::now(),
+                });
+                return;
+            }
+        }
         // Only allow one pending tool call at a time
         let re = Regex::new(r#"\[tool_call:\s*(read_file|read_directory)\((?:path\s*=\s*)?['"](.*?)['"]\)\]"#).unwrap();
         if let Some(cap) = re.captures(message) {
@@ -397,6 +430,37 @@ impl App {
                     }
                     Err(e) => Ok(format!("[TOOL ERROR: read_directory]\nPath: {}\nError: {}", pb.display(), e)),
                 }
+            }
+            ToolCall::EditFile { path, edits } => {
+                let mut pb = PathBuf::from(&self.working_directory);
+                pb.push(&path);
+                let mut current_content = String::new();
+                if pb.exists() {
+                    current_content = fs::read_to_string(&pb)?;
+                }
+
+                let mut new_content = current_content.clone();
+                for edit in edits {
+                    let start_line = edit.start_line.saturating_sub(1);
+                    let end_line = edit.end_line.saturating_sub(1);
+                    let new_text = edit.new_text;
+
+                    let lines: Vec<&str> = new_content.lines().collect();
+                    let mut updated_lines = Vec::new();
+                    for i in 0..lines.len() {
+                        if i < start_line {
+                            updated_lines.push(lines[i]);
+                        } else if i >= start_line && i <= end_line {
+                            updated_lines.push(&new_text);
+                        } else {
+                            updated_lines.push(lines[i]);
+                        }
+                    }
+                    new_content = updated_lines.join("\n");
+                }
+
+                fs::write(&pb, &new_content)?;
+                Ok(format!("[TOOL RESULT: edit_file]\nPath: {}\n---\n{}", pb.display(), new_content))
             }
         }
     }

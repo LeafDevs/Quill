@@ -1,0 +1,11 @@
+Fix Tool calls
+Cargo Check and fix errors
+add the other tool calls
+do ALOT of debugging and prompt tweaking
+Implement reasoning model support (currently none)
+
+
+Maybe add other provider support like openai, gemini, anthropic and even openrouter
+Maybe even add a backend server to make this a paid 20$ a month or 30$ a month for access to 500 requests a month for premium models from other providers
+
+find beta testers/people who want to test this and give me feedback cuz why not it might be very good, or it might not :P.
